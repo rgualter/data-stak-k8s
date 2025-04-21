@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pyspark-transformer-config
+  namespace: processing
+data:
+  MINIO_ENDPOINT: "minio-api.storage.svc.cluster.local:9000"
+  BRONZE_BUCKET: "bronze"
+  SILVER_BUCKET: "silver"
+  GOLD_BUCKET: "gold"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: bronze-to-silver-job
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: pyspark
+        image: pyspark-transformer:latest
+        imagePullPolicy: IfNotPresent
+        args: ["bronze_to_silver.py"]
+        env:
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: MINIO_ENDPOINT
+        - name: BRONZE_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: BRONZE_BUCKET
+        - name: SILVER_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: SILVER_BUCKET
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: silver-to-gold-job
+  namespace: processing
+spec:
+  template:
+    spec:
+      containers:
+      - name: pyspark
+        image: pyspark-transformer:latest
+        imagePullPolicy: IfNotPresent
+        args: ["silver_to_gold.py"]
+        env:
+        - name: MINIO_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: MINIO_ENDPOINT
+        - name: SILVER_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: SILVER_BUCKET
+        - name: GOLD_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: pyspark-transformer-config
+              key: GOLD_BUCKET
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+      restartPolicy: OnFailure
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: processing
+type: Opaque
+stringData:
+  root-user: minioadmin
+  root-password: minioadmin

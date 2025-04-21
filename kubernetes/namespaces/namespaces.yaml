@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingestion
+  labels:
+    name: ingestion
+    tier: bronze
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: processing
+  labels:
+    name: processing
+    tier: silver-gold
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: storage
+  labels:
+    name: storage
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orchestration
+  labels:
+    name: orchestration
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: visualization
+  labels:
+    name: visualization

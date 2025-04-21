@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finance-ingestor
+  namespace: ingestion
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finance-ingestor
+  template:
+    metadata:
+      labels:
+        app: finance-ingestor
+    spec:
+      containers:
+      - name: finance-ingestor
+        image: finance-ingestor:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: MINIO_ENDPOINT
+          value: "minio-api.storage.svc.cluster.local:9000"
+        - name: MINIO_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-user
+        - name: MINIO_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: minio-credentials
+              key: root-password
+        - name: MINIO_BUCKET
+          value: "bronze"
+        - name: SYMBOLS
+          value: "AAPL,MSFT,GOOGL,AMZN,META"
+        - name: INTERVAL
+          value: "1d"
+        - name: RANGE
+          value: "1mo"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 60
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-credentials
+  namespace: ingestion
+type: Opaque
+stringData:
+  root-user: minioadmin
+  root-password: minioadmin
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finance-ingestor-job
+  namespace: ingestion
+spec:
+  schedule: "0 */6 * * *"  # A cada 6 horas
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: finance-ingestor
+            image: finance-ingestor:latest
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: MINIO_ENDPOINT
+              value: "minio-api.storage.svc.cluster.local:9000"
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: root-user
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-credentials
+                  key: root-password
+            - name: MINIO_BUCKET
+              value: "bronze"
+            - name: SYMBOLS
+              value: "AAPL,MSFT,GOOGL,AMZN,META"
+            - name: INTERVAL
+              value: "1d"
+            - name: RANGE
+              value: "1mo"
+          restartPolicy: OnFailure

@@ -1,0 +1,335 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-config
+  namespace: orchestration
+data:
+  AIRFLOW__CORE__EXECUTOR: "KubernetesExecutor"
+  AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: "postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow"
+  AIRFLOW__KUBERNETES_EXECUTOR__NAMESPACE: "orchestration"
+  AIRFLOW__KUBERNETES__WORKER_CONTAINER_REPOSITORY: "apache/airflow"
+  AIRFLOW__KUBERNETES__WORKER_CONTAINER_TAG: "2.10.1"
+  AIRFLOW__KUBERNETES__POD_TEMPLATE_FILE: "/opt/airflow/pod_template.yaml"
+  AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+  AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: airflow-secrets
+  namespace: orchestration
+type: Opaque
+stringData:
+  AIRFLOW__CORE__FERNET_KEY: "UKMzEm3yIuFYEq1y3-2FxPNWSVwRASpahmQ9kQfEr8E="
+  AIRFLOW__WEBSERVER__SECRET_KEY: "openssl-rand-base64-30"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-dags
+  namespace: orchestration
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-logs
+  namespace: orchestration
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-webserver
+  namespace: orchestration
+spec:
+  serviceName: "airflow-webserver"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow
+      component: webserver
+  template:
+    metadata:
+      labels:
+        app: airflow
+        component: webserver
+    spec:
+      containers:
+      - name: airflow-webserver
+        image: apache/airflow:2.10.1 #rgualter/airflow #apache/airflow:2.5.1
+        args: ["webserver"]
+        #args: ["bash", "-c", "airflow db init && airflow webserver"] #["webserver"]
+        ports:
+        - name: web
+          containerPort: 8080
+        env:
+        - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+          value: "postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow"
+        envFrom:
+        - configMapRef:
+            name: airflow-config
+        - secretRef:
+            name: airflow-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: dags
+          mountPath: /opt/airflow/dags
+        - name: logs
+          mountPath: /opt/airflow/logs
+        - name: pod-template
+          mountPath: /opt/airflow/pod_template.yaml
+          subPath: pod_template.yaml
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 120
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 60
+          timeoutSeconds: 5
+      volumes:
+      - name: dags
+        persistentVolumeClaim:
+          claimName: airflow-dags
+      - name: logs
+        persistentVolumeClaim:
+          claimName: airflow-logs
+      - name: pod-template
+        configMap:
+          name: airflow-pod-template
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-scheduler
+  namespace: orchestration
+spec:
+  serviceName: "airflow-scheduler"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow
+      component: scheduler
+  template:
+    metadata:
+      labels:
+        app: airflow
+        component: scheduler
+    spec:
+      containers:
+      - name: airflow-scheduler
+        image: apache/airflow:2.10.1 #rgualter/airflow #apache/airflow:2.5.1
+        args: ["bash", "-c", "airflow db init && airflow webserver"]
+        env:
+        - name: AIRFLOW__CORE__SQL_ALCHEMY_CONN
+          value: "postgresql+psycopg2://airflow:airflow@airflow-postgres:5432/airflow"
+        envFrom:
+        - configMapRef:
+            name: airflow-config
+        - secretRef:
+            name: airflow-secrets
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: dags
+          mountPath: /opt/airflow/dags
+        - name: logs
+          mountPath: /opt/airflow/logs
+        - name: pod-template
+          mountPath: /opt/airflow/pod_template.yaml
+          subPath: pod_template.yaml
+      volumes:
+      - name: dags
+        persistentVolumeClaim:
+          claimName: airflow-dags
+      - name: logs
+        persistentVolumeClaim:
+          claimName: airflow-logs
+      - name: pod-template
+        configMap:
+          name: airflow-pod-template
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-postgres
+  namespace: orchestration
+spec:
+  serviceName: "airflow-postgres"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow
+      component: postgres
+  template:
+    metadata:
+      labels:
+        app: airflow
+        component: postgres
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:13
+        ports:
+        - containerPort: 5432
+        env:
+        - name: POSTGRES_USER
+          value: "airflow"
+        - name: POSTGRES_PASSWORD
+          value: "airflow"
+        - name: POSTGRES_DB
+          value: "airflow"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: postgres-data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: postgres-data
+        persistentVolumeClaim:
+          claimName: airflow-postgres-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airflow-postgres-data
+  namespace: orchestration
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-webserver
+  namespace: orchestration
+spec:
+  type: NodePort
+  ports:
+  - port: 8080
+    targetPort: 8080
+    nodePort: 30002
+  selector:
+    app: airflow
+    component: webserver
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-postgres
+  namespace: orchestration
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: airflow
+    component: postgres
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airflow-pod-template
+  namespace: orchestration
+data:
+  pod_template.yaml: |
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: dummy-name
+    spec:
+      containers:
+        - env:
+          - name: AIRFLOW__CORE__EXECUTOR
+            value: LocalExecutor
+          - name: MINIO_ENDPOINT
+            value: minio-api.storage.svc.cluster.local:9000
+          - name: MINIO_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: root-user
+          - name: MINIO_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: minio-credentials
+                key: root-password
+          image: apache/airflow:2.10.1
+          imagePullPolicy: IfNotPresent
+          name: base
+          resources:
+            limits:
+              cpu: 1
+              memory: 1Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+      restartPolicy: Never
+      serviceAccountName: airflow
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: airflow
+  namespace: orchestration
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: airflow
+  namespace: orchestration
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "delete", "patch"]
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow
+  namespace: orchestration
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: airflow
+subjects:
+- kind: ServiceAccount
+  name: airflow
+  namespace: orchestration

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jupyter
+  namespace: visualization
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jupyter
+  template:
+    metadata:
+      labels:
+        app: jupyter
+    spec:
+      containers:
+      - name: jupyter
+        image: jupyter/pyspark-notebook:latest
+        ports:
+        - containerPort: 8888
+          name: jupyter
+        env:
+        - name: JUPYTER_ENABLE_LAB
+          value: "yes"
+        - name: MINIO_ENDPOINT
+          value: "minio-api.storage.svc.cluster.local:9000"
+        - name: POSTGRES_HOST
+          value: "postgres.storage.svc.cluster.local"
+        - name: POSTGRES_PORT
+          value: "5432"
+        - name: POSTGRES_USER
+          value: "postgres"
+        - name: POSTGRES_PASSWORD
+          value: "postgres"
+        - name: POSTGRES_DB
+          value: "datastack"
+        command:
+        - "start-notebook.sh"
+        args:
+        - "--NotebookApp.token=''"
+        - "--NotebookApp.password=''"
+        - "--NotebookApp.allow_origin='*'"
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: jupyter-data
+          mountPath: /home/jovyan/work
+      volumes:
+      - name: jupyter-data
+        persistentVolumeClaim:
+          claimName: jupyter-data
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jupyter-data
+  namespace: visualization
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter
+  namespace: visualization
+spec:
+  type: NodePort
+  ports:
+  - port: 8888
+    targetPort: 8888
+    nodePort: 30003
+  selector:
+    app: jupyter

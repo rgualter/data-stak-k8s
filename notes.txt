@@ -1,0 +1,13 @@
+kubectl apply -f /home/ricardo/Documentos/Projects/data-stack-k8s/kubernetes/airflow/airflow.yaml
+
+kubectl delete pods -n orchestration -l app=airflow
+
+
+
+kubectl exec -it airflow-webserver-0 -n orchestration -- airflow users create \
+    --username admin \
+    --firstname Admin \
+    --lastname User \
+    --role Admin \
+    --email admin@example.com \
+    --password admin
